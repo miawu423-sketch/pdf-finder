@@ -19,6 +19,7 @@
     { sel: 'meta[name="publishdate"]', label: 'publishdate' },
     { sel: 'meta[name="publish_date"]', label: 'publish_date' },
     { sel: 'meta[name="pubdate"]', label: 'pubdate' },
+    { sel: 'meta[name="PubDate"]', label: 'PubDate' },
     { sel: 'meta[name="date"]', label: 'date' },
     { sel: 'meta[name="dc.date"]', label: 'dc.date' },
     { sel: 'meta[name="dc.date.issued"]', label: 'dc.date.issued' },
@@ -33,8 +34,30 @@
     { sel: 'meta[name="og:updated_time"]', label: 'og:updated_time' },
     { sel: 'meta[property="og:updated_time"]', label: 'og:updated_time' },
     { sel: 'meta[name="last-modified"]', label: 'last-modified' },
-    { sel: 'meta[http-equiv="last-modified"]', label: 'http-equiv:last-modified' }
+    { sel: 'meta[http-equiv="last-modified"]', label: 'http-equiv:last-modified' },
+    { sel: 'meta[name="weibo:article:create_at"]', label: 'weibo:article:create_at' },
+    { sel: 'meta[name="created"]', label: 'created' },
+    { sel: 'meta[name="pub_date"]', label: 'pub_date' }
   ];
+
+  // 补充：通用扫描所有 meta 标签，匹配 name 中含 date/time/publish 的
+  document.querySelectorAll('meta[name][content]').forEach(function(el) {
+    var name = el.getAttribute('name');
+    var content = el.getAttribute('content');
+    if (!name || !content) return;
+    var nameLower = name.toLowerCase();
+    if (/date|time|publish|pubdate/.test(nameLower)) {
+      // 检查 content 是否像日期（含数字和分隔符）
+      if (/\d{4}[\-\/\.]\d{1,2}[\-\/\.]\d{1,2}/.test(content) || /\d{8}/.test(content)) {
+        var alreadyFound = metaSelectors.some(function(m) {
+          return m.sel === 'meta[name="' + name + '"]';
+        });
+        if (!alreadyFound) {
+          metaSelectors.push({ sel: 'meta[name="' + name + '"]', label: name });
+        }
+      }
+    }
+  });
 
   metaSelectors.forEach(function(m) {
     var el = document.querySelector(m.sel);
