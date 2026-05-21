@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Paper PDF Finder - 安装页</title>
+<title>Web Tools - 网页小工具集</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -19,101 +19,85 @@ h1 { font-size: 28px; font-weight: 600; margin-bottom: 8px; text-align: center; 
 h2 { font-size: 17px; font-weight: 600; margin: 32px 0 12px; }
 p { margin-bottom: 12px; font-size: 15px; }
 
-.hero {
+.tool-card {
   background: #fff;
   border: 1px solid #d2d2d7;
   border-radius: 16px;
-  padding: 32px;
-  margin: 24px 0;
-  text-align: center;
+  padding: 28px;
+  margin: 16px 0;
 }
-.hero p { color: #86868b; font-size: 14px; margin-bottom: 20px; }
+.tool-card h3 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+.tool-card .desc { color: #86868b; font-size: 14px; margin-bottom: 16px; }
+.tool-card .bm-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
 .bookmarklet-link {
   display: inline-block;
-  background: #0071e3;
   color: #fff;
-  padding: 14px 32px;
+  padding: 12px 28px;
   border-radius: 10px;
   text-decoration: none;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 500;
   transition: all 0.2s;
   cursor: grab;
 }
-.bookmarklet-link:hover { background: #0077ed; transform: scale(1.02); }
-.hero .hint { margin-top: 14px; font-size: 12px; color: #999; }
+.bookmarklet-link:hover { transform: scale(1.02); }
+.bm-pdf { background: #0071e3; }
+.bm-pdf:hover { background: #0077ed; }
+.bm-time { background: #34c759; }
+.bm-time:hover { background: #2db84d; }
+.tool-card .hint { font-size: 12px; color: #999; }
 
-.steps {
-  counter-reset: step;
-  list-style: none;
-  padding: 0;
-}
-.steps li {
-  counter-increment: step;
-  padding: 14px 0 14px 52px;
-  position: relative;
-  font-size: 15px;
-  border-bottom: 1px solid #e8e8ed;
-}
-.steps li:last-child { border-bottom: none; }
-.steps li::before {
-  content: counter(step);
-  position: absolute;
-  left: 0;
-  top: 14px;
-  width: 34px;
-  height: 34px;
-  background: #0071e3;
-  color: #fff;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.install-note {
+  background: #fff9e6;
+  border-left: 3px solid #ff9f0a;
+  padding: 12px 16px;
+  border-radius: 0 8px 8px 0;
+  margin: 20px 0;
   font-size: 14px;
-  font-weight: 600;
 }
+
+.section {
+  background: #fff;
+  border: 1px solid #d2d2d7;
+  border-radius: 12px;
+  padding: 20px;
+  margin: 16px 0;
+}
+.section h3 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+.section table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.section td, .section th { padding: 8px; text-align: left; border-bottom: 1px solid #e8e8ed; }
+.section th { color: #86868b; font-weight: 500; }
 
 .code-box {
   background: #1d1d1f;
   color: #f5f5f7;
-  border-radius: 12px;
-  padding: 16px 20px;
-  margin: 16px 0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin: 10px 0;
   position: relative;
   font-family: "SF Mono", "Menlo", monospace;
-  font-size: 12px;
+  font-size: 11.5px;
   line-height: 1.5;
   word-break: break-all;
   white-space: pre-wrap;
 }
 .copy-btn {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 8px;
+  right: 8px;
   background: rgba(255,255,255,0.15);
   color: #f5f5f7;
   border: none;
-  padding: 4px 12px;
-  border-radius: 6px;
-  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 5px;
+  font-size: 11px;
   cursor: pointer;
 }
 .copy-btn:hover { background: rgba(255,255,255,0.25); }
-
-.features {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin: 16px 0;
-}
-.feat {
-  background: #fff;
-  border: 1px solid #d2d2d7;
-  border-radius: 10px;
-  padding: 16px;
-}
-.feat h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
-.feat p { font-size: 13px; color: #86868b; margin: 0; }
 
 .version {
   text-align: center;
@@ -127,57 +111,91 @@ p { margin-bottom: 12px; font-size: 15px; }
 </head>
 <body>
 <div class="container">
-  <h1>Paper PDF Finder</h1>
-  <p class="subtitle">在任何论文页面一键提取本文 PDF 下载链接</p>
+  <h1>Web Tools</h1>
+  <p class="subtitle">实用网页小工具集 — 拖到书签栏即可使用</p>
 
-  <div class="hero">
-    <p>将下方按钮拖到浏览器书签栏即可安装</p>
-    <a class="bookmarklet-link" id="bm-btn">PDF Finder</a>
-    <p class="hint">安装后在论文页面点击书签即可使用 | 自动获取最新版本</p>
+  <!-- 工具 1: PDF Finder -->
+  <div class="tool-card">
+    <h3>PDF Finder</h3>
+    <p class="desc">在论文页面一键提取 PDF 下载链接。支持 Springer / ACM / arXiv / Elsevier 等主流出版商。</p>
+    <div class="bm-row">
+      <a class="bookmarklet-link bm-pdf" id="bm-pdf">PDF Finder</a>
+      <span class="hint">拖到书签栏</span>
+    </div>
   </div>
 
-  <h2>备用安装方式</h2>
-  <ol class="steps">
-    <li>右键书签栏 → 添加书签</li>
-    <li>名称填 <code>PDF Finder</code></li>
-    <li>网址栏粘贴下面的代码</li>
-  </ol>
-  <div class="code-box" id="code-display">
-    <button class="copy-btn" onclick="copyCode()">复制</button>
-    <span id="code-text"></span>
+  <!-- 工具 2: Publish Time -->
+  <div class="tool-card">
+    <h3>Publish Time</h3>
+    <p class="desc">提取当前网页源码中的发布时间。从 meta 标签和 JSON-LD 结构化数据中读取。</p>
+    <div class="bm-row">
+      <a class="bookmarklet-link bm-time" id="bm-time">Publish Time</a>
+      <span class="hint">拖到书签栏</span>
+    </div>
   </div>
 
-  <h2>功能特点</h2>
-  <div class="features">
-    <div class="feat"><h3>自动更新</h3><p>脚本托管在云端，每次点击加载最新版本</p></div>
-    <div class="feat"><h3>智能识别</h3><p>自动区分本文 PDF 和推荐文章链接</p></div>
-    <div class="feat"><h3>付费提醒</h3><p>检测到付费文章时显示警告</p></div>
-    <div class="feat"><h3>一键复制</h3><p>只有一条结果时自动复制到剪贴板</p></div>
+  <div class="install-note">
+    <strong>安装方式：</strong>把上方彩色按钮直接拖到浏览器书签栏。如果拖不动，右键按钮 → 添加到收藏夹/书签，或复制下方代码手动创建书签。
   </div>
 
-  <h2>支持的学术网站</h2>
-  <p>Springer / Nature / Elsevier / Wiley / ACM / IEEE* / MDPI / arXiv / Frontiers / Taylor & Francis / SAGE 等主流出版商</p>
-  <p style="font-size:13px;color:#86868b;">* IEEE 需先登录机构账号</p>
+  <!-- 手动安装代码 -->
+  <h2>手动安装代码</h2>
 
-  <div class="version" id="version-info">
-    v4 | 自动更新 | <a href="https://github.com/miawu423-sketch/pdf-finder" style="color:#0071e3;">GitHub</a>
+  <p style="font-size:13px;color:#86868b;margin-bottom:4px;">PDF Finder:</p>
+  <div class="code-box">
+    <button class="copy-btn" onclick="copyCode('pdf')">复制</button>
+    <span id="code-pdf"></span>
+  </div>
+
+  <p style="font-size:13px;color:#86868b;margin-bottom:4px;margin-top:16px;">Publish Time:</p>
+  <div class="code-box">
+    <button class="copy-btn" onclick="copyCode('time')">复制</button>
+    <span id="code-time"></span>
+  </div>
+
+  <!-- 功能说明 -->
+  <h2>功能说明</h2>
+
+  <div class="section">
+    <h3>PDF Finder</h3>
+    <table>
+      <tr><th>标签</th><th>含义</th></tr>
+      <tr><td><span style="background:#34c759;color:#fff;padding:1px 6px;border-radius:3px;font-size:11px;">meta</span> 本文</td><td>本文的 PDF 直链，最可靠</td></tr>
+      <tr><td><span style="background:#0071e3;color:#fff;padding:1px 6px;border-radius:3px;font-size:11px;">link</span></td><td>页面扫描到的 PDF 链接</td></tr>
+      <tr><td><span style="border:1px solid #ffc107;color:#856404;background:#fff3cd;padding:1px 5px;border-radius:3px;font-size:11px;">可能需要订阅</span></td><td>付费文章，需登录后访问</td></tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <h3>Publish Time</h3>
+    <table>
+      <tr><th>来源</th><th>说明</th></tr>
+      <tr><td><span style="background:#34c759;color:#fff;padding:1px 6px;border-radius:3px;font-size:11px;">meta</span></td><td>HTML meta 标签（article:published_time 等）</td></tr>
+      <tr><td><span style="background:#0071e3;color:#fff;padding:1px 6px;border-radius:3px;font-size:11px;">json-ld</span></td><td>JSON-LD 结构化数据（datePublished）</td></tr>
+    </table>
+    <p style="font-size:12px;color:#86868b;margin-top:8px;margin-bottom:0;">绿色高亮 = 最可能的发布时间，自动复制到剪贴板。</p>
+  </div>
+
+  <div class="version">
+    Web Tools v1 | 自动更新 | <a href="https://github.com/miawu423-sketch/pdf-finder" style="color:#0071e3;">GitHub</a>
   </div>
 </div>
 
 <script>
-// ====== 配置：修改为你的 GitHub Pages 域名 ======
-var SCRIPT_URL = 'https://miawu423-sketch.github.io/pdf-finder/pdf-finder.js';
-// ================================================
+var BASE = 'https://miawu423-sketch.github.io/pdf-finder/';
+var LOADER_PDF = "javascript:void((function(){var s=document.createElement('script');s.src='" + BASE + "pdf-finder.js?v='+Date.now();document.body.appendChild(s)})())";
+var LOADER_TIME = "javascript:void((function(){var s=document.createElement('script');s.src='" + BASE + "publish-time.js?v='+Date.now();document.body.appendChild(s)})())";
 
-var LOADER = "javascript:void((function(){var s=document.createElement('script');s.src='" + SCRIPT_URL + "?v='+Date.now();document.body.appendChild(s)})())";
+document.getElementById('bm-pdf').href = LOADER_PDF;
+document.getElementById('bm-time').href = LOADER_TIME;
+document.getElementById('code-pdf').textContent = LOADER_PDF;
+document.getElementById('code-time').textContent = LOADER_TIME;
 
-document.getElementById('bm-btn').href = LOADER;
-document.getElementById('code-text').textContent = LOADER;
-
-function copyCode() {
-  navigator.clipboard.writeText(LOADER).then(function() {
-    document.querySelector('.copy-btn').textContent = 'Copied!';
-    setTimeout(function() { document.querySelector('.copy-btn').textContent = '复制'; }, 2000);
+function copyCode(type) {
+  var code = type === 'pdf' ? LOADER_PDF : LOADER_TIME;
+  navigator.clipboard.writeText(code).then(function() {
+    event.target.textContent = 'Copied!';
+    setTimeout(function() { event.target.textContent = '复制'; }, 2000);
   });
 }
 </script>
