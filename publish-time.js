@@ -121,7 +121,7 @@
 
   function formatDate(d) {
     var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
-    var date = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+    var date = d.getFullYear() + '/' + pad(d.getMonth()+1) + '/' + pad(d.getDate());
     var h = d.getHours(), mi = d.getMinutes(), s = d.getSeconds();
     if (h === 0 && mi === 0 && s === 0) return date;
     return date + ' ' + pad(h) + ':' + pad(mi) + ':' + pad(s);
