@@ -97,14 +97,16 @@
     if (obj.mainEntity) extractFromJsonLd(obj.mainEntity);
   }
 
-  // === 第 3 层：内联 script 标签 ===
-  document.querySelectorAll('script:not([type]):not([src])').forEach(function(script) {
+  // === 第 3 层：所有内联 script 标签 + 全文扫描 ===
+  // 不再限制 type——扫所有不带 src 的 script
+  document.querySelectorAll('script:not([src])').forEach(function(script) {
     scanInlineScript(script.textContent);
   });
-  // 也扫一下有 type="text/javascript" 的
-  document.querySelectorAll('script[type="text/javascript"]:not([src])').forEach(function(script) {
-    scanInlineScript(script.textContent);
-  });
+  // 兜底：直接扫整个页面 HTML 源码（捕获任何位置的 /Date/ 模式）
+  try {
+    var fullHTML = document.documentElement.outerHTML || '';
+    if (fullHTML) scanInlineScript(fullHTML);
+  } catch(e) {}
 
   function scanInlineScript(text) {
     if (!text || text.length < 10) return;
@@ -113,16 +115,15 @@
     var dm;
     while ((dm = dateRe.exec(text)) !== null) {
       var ms = +dm[1];
-      if (dm[1].length === 10) ms *= 1000; // 秒 → 毫秒
-      var d = new Date(ms);
-      if (!isNaN(d.getTime())) {
-        var label = 'inline /Date/';
-        // 尝试从上下文找到变量名
+      if (dm[1].length === 10) ms *= 1000;
+      var dt = new Date(ms);
+      if (!isNaN(dt.getTime()) && dt.getFullYear() >= 2000 && dt.getFullYear() <= 2100) {
+        // 从上下文猜变量名
         var pos = dm.index;
-        var ctx = text.substring(Math.max(0, pos - 200), pos);
+        var ctx = text.substring(Math.max(0, pos - 300), pos);
         var varMatch = ctx.match(/(\w+(?:Time|time|Date|date|Publish|publish|Create|create))\s*[=:]/);
-        if (varMatch) label = varMatch[1];
-        results.push({ source: 'script', label: label, raw: dm[0], parsed: formatDate(d) });
+        var label = varMatch ? varMatch[1] : 'inline /Date/';
+        results.push({ source: 'script', label: label, raw: dm[0], parsed: formatDate(dt) });
       }
     }
     // 2. 变量赋值中的时间戳（13位毫秒级，旁边有 time/date/publish 等关键词）
