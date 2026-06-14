@@ -97,6 +97,57 @@
     if (obj.mainEntity) extractFromJsonLd(obj.mainEntity);
   }
 
+  // === 第 3 层：内联 script 标签 ===
+  document.querySelectorAll('script:not([type]):not([src])').forEach(function(script) {
+    scanInlineScript(script.textContent);
+  });
+  // 也扫一下有 type="text/javascript" 的
+  document.querySelectorAll('script[type="text/javascript"]:not([src])').forEach(function(script) {
+    scanInlineScript(script.textContent);
+  });
+
+  function scanInlineScript(text) {
+    if (!text || text.length < 10) return;
+    // 1. ASP.NET /Date(milliseconds+tz)/ 格式
+    var dateRe = /\/Date\((\d{10,13})([+-]\d{4})?\)\//g;
+    var dm;
+    while ((dm = dateRe.exec(text)) !== null) {
+      var ms = +dm[1];
+      if (dm[1].length === 10) ms *= 1000; // 秒 → 毫秒
+      var d = new Date(ms);
+      if (!isNaN(d.getTime())) {
+        var label = 'inline /Date/';
+        // 尝试从上下文找到变量名
+        var pos = dm.index;
+        var ctx = text.substring(Math.max(0, pos - 200), pos);
+        var varMatch = ctx.match(/(\w+(?:Time|time|Date|date|Publish|publish|Create|create))\s*[=:]/);
+        if (varMatch) label = varMatch[1];
+        results.push({ source: 'script', label: label, raw: dm[0], parsed: formatDate(d) });
+      }
+    }
+    // 2. 变量赋值中的时间戳（13位毫秒级，旁边有 time/date/publish 等关键词）
+    var tsRe = /\b(publishTime|createTime|pubTime|pubtime|create_time|publish_date|publishTime|createtime)\b\s*[=:]\s*["']?(\d{10,13})["']?/gi;
+    var tm;
+    while ((tm = tsRe.exec(text)) !== null) {
+      var label = tm[1];
+      var val = +tm[2];
+      if (tm[2].length === 10) val *= 1000;
+      var dt = new Date(val);
+      if (!isNaN(dt.getTime()) && dt.getFullYear() >= 2000 && dt.getFullYear() <= 2100) {
+        results.push({ source: 'script', label: label, raw: tm[2], parsed: formatDate(dt) });
+      }
+    }
+    // 3. ISO 格式的数据属性（如 "publishTime":"2025-11-13 08:00:00"）
+    var isoRe = /\b(publishTime|createTime|pubTime|pubtime|create_time|publish_date)\b\s*[=:]\s*"([^"]{10,30})"/gi;
+    var im;
+    while ((im = isoRe.exec(text)) !== null) {
+      var pt = parseTime(im[2]);
+      if (pt) {
+        results.push({ source: 'script', label: im[1], raw: im[2], parsed: pt });
+      }
+    }
+  }
+
   // === 时间解析 ===
   function parseTime(str) {
     // 尝试直接 Date.parse
@@ -161,6 +212,7 @@
     '.T{display:inline-block;padding:2px 7px;border-radius:4px;font:500 11px/1.6 system-ui;color:#fff}',
     '.Tm{background:#34c759}',
     '.Tj{background:#0071e3}',
+    '.Ts{background:#ff9f0a}',
     '.label{font:12px system-ui;color:#86868b}',
     '.time{font:500 15px/1.4 "SF Mono",Menlo,Consolas,monospace;color:#1d1d1f;margin:4px 0}',
     '.raw{font:11px/1.4 "SF Mono",Menlo,Consolas,monospace;color:#86868b;word-break:break-all}',
@@ -194,7 +246,8 @@
   var prevSource = '';
   results.forEach(function(r, i) {
     if (r.source !== prevSource && i > 0) {
-      h += '<div class="divider">' + (r.source === 'json-ld' ? 'JSON-LD \u7ed3\u6784\u5316\u6570\u636e' : 'Meta \u6807\u7b7e') + '</div>';
+      var sectionLabel = r.source === 'json-ld' ? 'JSON-LD \u7ed3\u6784\u5316\u6570\u636e' : (r.source === 'script' ? '\u5185\u8054\u811a\u672c (script)' : 'Meta \u6807\u7b7e');
+      h += '<div class="divider">' + sectionLabel + '</div>';
     }
     prevSource = r.source;
 
@@ -202,7 +255,7 @@
     if (i === publishIdx) cls += ' primary';
 
     h += '<div class="' + cls + '"><div class="IH">';
-    h += '<span class="T ' + (r.source === 'meta' ? 'Tm' : 'Tj') + '">' + r.source + '</span>';
+    h += '<span class="T ' + (r.source === 'meta' ? 'Tm' : (r.source === 'json-ld' ? 'Tj' : 'Ts')) + '">' + r.source + '</span>';
     h += '<span class="label">' + r.label + '</span></div>';
     if (r.parsed) {
       h += '<div class="time">' + r.parsed + '</div>';
