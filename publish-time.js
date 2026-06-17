@@ -73,10 +73,17 @@ function parseTime(str){
   // Missing space
   str=str.replace(/(\d{4}-\d{2}-\d{2})(\d{2}:\d{2})/,'$1 $2').replace(/(\d{4}\/\d{2}\/\d{2})(\d{2}:\d{2})/,'$1 $2');
 
-  // --- Auto-detect: string with no timezone → bjFromString (Beijing) ---
+  // --- Timezone-aware routing ---
+  // If string has explicit timezone marker (Z, +09:00, -05:00, +0800 etc.), use native Date
+  // which correctly interprets the timezone, then convert to Beijing via bjFromEpoch
+  if(/[Zz]$/.test(str)||/[+-]\d{2}:?\d{2}$/.test(str)){
+    var dtz=new Date(str);
+    if(!isNaN(dtz.getTime()))return bjFromEpoch(dtz.getTime());
+  }
+  // No timezone marker — components assumed to be Beijing Time
   var local=bjFromString(str);
   if(local)return local;
-  // --- Fallback: native Date (RFC 2822, ISO+TZ) → convert to Beijing ---
+  // Last resort
   var d=new Date(str);
   return isNaN(d.getTime())?null:bjFromEpoch(d.getTime());
 }
