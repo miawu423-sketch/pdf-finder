@@ -1,4 +1,4 @@
-// Publish Time Extractor v2 — 7-layer, all outputs in Beijing Time
+// Publish Time Extractor v3 — 7-layer, all outputs in Beijing Time
 (function(){
 'use strict';
 if(document.getElementById('__pub_time')){document.getElementById('__pub_time').remove();if(window.__pub_time_timer)clearInterval(window.__pub_time_timer);return;}
@@ -146,6 +146,11 @@ function extractScriptVars(text){
     var rm2=text.match(new RegExp(p+'\\s*:\\s*"([^"]{10,30})"'));
     if(rm2){addResult('script','published:'+p.slice(1,-1),rm2[1]);}
   });
+  // Generic "time" key — common in Chinese news platforms (e.g. QQ News Page.build data)
+  var tm=text.match(/"time"\s*:\s*"([^"]{8,30})"/);
+  if(tm&&/\d{4}[-\/]\d{1,2}[-\/]\d{1,2}/.test(tm[1])){
+    addResult('script','published:time',tm[1]);
+  }
   var tr=/\b(created_at|publishTime|createTime|timestamp)\b\s*[=:]\s*["']?(\d{10,13})["']?/g,tm;
   while((tm=tr.exec(text))!==null){
     var v=+tm[2];if(tm[2].length===10)v*=1000;
