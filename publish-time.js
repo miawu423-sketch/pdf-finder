@@ -26,29 +26,41 @@
 
   // ====== Utils ======
   function pad(n){return n<10?'0'+n:''+n;}
-  function fmtBeijing(d){
-    var offset=8*60, localOffset=d.getTimezoneOffset();
-    var bt=new Date(d.getTime()+(offset+localOffset)*60000);
-    var date=bt.getFullYear()+'/'+pad(bt.getMonth()+1)+'/'+pad(bt.getDate());
-    var h=bt.getHours(),mi=bt.getMinutes(),s=bt.getSeconds();
-    if(h===0&&mi===0&&s===0)return date;
-    return date+' '+pad(h)+':'+pad(mi)+':'+pad(s);
+  // Parse string into local-time Date (avoids JS treating "2026-06-10" as UTC midnight)
+  function parseLocalDate(str){
+    var m=str.match(/(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})[日]?\s*(\d{1,2})?[：:]*(\d{1,2})?[：:]*(\d{1,2})?/);
+    if(!m||+m[2]===0||+m[3]===0)return null;
+    return new Date(+m[1],+m[2]-1,+m[3],+(m[4]||0),+(m[5]||0),+(m[6]||0));
   }
+  // Format Date using local time (no timezone conversion — components are already in local time)
+  function fmtLocal(d){
+    return d.getFullYear()+'/'+pad(d.getMonth()+1)+'/'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds());
+  }
+  // Format epoch-ms timestamp as Beijing Time (UTC+8)
+  function fmtEpoch(ms){
+    var offset=8*60, d=new Date(ms), lo=d.getTimezoneOffset();
+    var bt=new Date(d.getTime()+(offset+lo)*60000);
+    return fmtLocal(bt);
+  }
+  function formatTime(val){
+    // Auto-detect: if it's a Date from string parsing, use local time
+    // For /Date(ms)/ and numeric timestamps, use epoch conversion
+    return typeof val==='number' ? fmtEpoch(val) : (val instanceof Date ? fmtLocal(val) : null);
+  }
+  // Format with type detection: epoch-timestamps get timezone conversion, strings use local time
   function nowYear(){return new Date().getFullYear();}
   function looksLikeDate(str){return /(?:20|19)\d{2}[-\/年\.]\d{1,2}[-\/月\.]\d{1,2}/.test(str)||/\d{4}[-\/\.]\d{1,2}[-\/\.]\d{1,2}\s+\d{1,2}:\d{2}/.test(str);}
 
   function parseTime(str){
     if(!str||str.length>50)return null;
     str=str.trim();
-    // Check if date-only (no time component) - don't apply UTC offset
-    var dateOnly=/^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(str)||/^\d{4}年\d{1,2}月\d{1,2}日$/.test(str);
     // ASP.NET /Date(ms+tz)/
     var am=/^\/Date\((\d{10,13})([+-]\d{4})?\)\/$/;
     var ama=am.exec(str);
-    if(ama){var ts=+ama[1];if(ama[1].length===10)ts*=1000;var dt=new Date(ts);return isNaN(dt.getTime())?null:fmtBeijing(dt);}
+    if(ama){var ts=+ama[1];if(ama[1].length===10)ts*=1000;var dt=new Date(ts);return isNaN(dt.getTime())?null:fmtLocal(dt);}
     // RFC 2822: Sun, 09 Mar 2025 22:21:38 +0900
     var rm=/^[A-Z][a-z]{2},\s/;
-    if(rm.test(str)){var d2=new Date(str);if(!isNaN(d2.getTime()))return fmtBeijing(d2);}
+    if(rm.test(str)){var d2=new Date(str);if(!isNaN(d2.getTime()))return fmtLocal(d2);}
     // 2-digit year: 26-05-22 → 2026-05-22
     if(/^\d{2}-/.test(str))str='20'+str;
     // Dot-separated: 2026.06.14
@@ -66,8 +78,8 @@
     var xm=str.match(/^(\d{4})(\d{2})\/(\d{2})(\d{2}:\d{2}:\d{2})$/);
     if(xm)str=xm[1]+'-'+xm[2]+'-'+xm[3]+' '+xm[4];
     // Timestamps (10 or 13 digits)
-    if(/^\d{10}$/.test(str)){var d3=new Date(+str*1000);return isNaN(d3.getTime())?null:fmtBeijing(d3);}
-    if(/^\d{13}$/.test(str)){var d4=new Date(+str);return isNaN(d4.getTime())?null:fmtBeijing(d4);}
+    if(/^\d{10}$/.test(str)){var d3=new Date(+str*1000);return isNaN(d3.getTime())?null:fmtLocal(d3);}
+    if(/^\d{13}$/.test(str)){var d4=new Date(+str);return isNaN(d4.getTime())?null:fmtLocal(d4);}
     // No-year MM-DD HH:MM → add current year
     var ny=str.match(/^(\d{2})-(\d{2})\s+(\d{2}:\d{2})$/);
     if(ny)str=nowYear()+'-'+ny[1]+'-'+ny[2]+' '+ny[3]+':00';
@@ -79,20 +91,19 @@
     var formats=[/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/,/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}/,
       /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/,/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}/,/^\d{4}-\d{2}-\d{2}$/,/^\d{4}\/\d{2}\/\d{2}$/,
       /^\d{4}年\d{1,2}月\d{1,2}日 \d{1,2}:\d{2}:\d{2}/,/^\d{4}年\d{1,2}月\d{1,2}日 \d{1,2}:\d{2}/,/^\d{4}年\d{1,2}月\d{1,2}日/];
-    var d=new Date(str);if(!isNaN(d.getTime())){
-      var result=fmtBeijing(d);
-      // If date-only input, strip the spurious timezone-offset hours
-      if(dateOnly)result=result.replace(/ \d{2}:\d{2}:\d{2}$/,' 00:00:00');
-      return result;
-    }
+    // Try manual parse first (avoids JS UTC-midnight bug for bare dates like "2026-06-10")
+    var pd=parseLocalDate(str);
+    if(pd&&!isNaN(pd.getTime()))return fmtLocal(pd);
+    // Fallback to native Date (RFC 2822, ISO 8601+TZ, etc.)
+    var d=new Date(str);if(!isNaN(d.getTime()))return fmtLocal(d);
 
     // Regex fallback
     var r=str.match(/(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})[日]?\s*(\d{1,2})?[：:]?(\d{1,2})?[：:]?(\d{1,2})?/);
-    if(!r){r=str.match(/(\d{4})[-/年](\d{1,2})月?$/);if(r){try{var d5=new Date(+r[1],+r[2]-1,1);return isNaN(d5.getTime())?null:fmtBeijing(d5).replace(/ \d{2}:\d{2}:\d{2}/,' 00:00:00');}catch(e){}}}
+    if(!r){r=str.match(/(\d{4})[-/年](\d{1,2})月?$/);if(r){try{var d5=new Date(+r[1],+r[2]-1,1);return isNaN(d5.getTime())?null:fmtLocal(d5);}catch(e){}}}
     if(r){
       var y=+r[1],mo=+r[2],da=+r[3],h=+(r[4]||0),mi=+(r[5]||0),s=+(r[6]||0);
       if(mo===0||da===0)return null;
-      try{var d6=new Date(y,mo-1,da,h,mi,s);return isNaN(d6.getTime())?null:fmtBeijing(d6);}catch(e){return null;}
+      try{var d6=new Date(y,mo-1,da,h,mi,s);return isNaN(d6.getTime())?null:fmtLocal(d6);}catch(e){return null;}
     }
     return null;
   }
@@ -165,7 +176,7 @@
       if(!isNaN(dt.getTime())&&dt.getFullYear()>=2000&&dt.getFullYear()<=2100){
         var ctx=text.substring(Math.max(0,m.index-300),m.index);
         var vm=ctx.match(/(\w+(?:Time|time|Date|date|Publish|publish|Create|create))\s*[=:]/);
-        addResult('script',vm?vm[1]:'inline /Date/',m[0],fmtBeijing(dt));
+        addResult('script',vm?vm[1]:'inline /Date/',m[0],fmtLocal(dt));
       }
     }
     // JSON-string fields (prefer modified)
@@ -185,7 +196,7 @@
       var v=+tm[2];if(tm[2].length===10)v*=1000;
       var d2=new Date(v);
       if(!isNaN(d2.getTime())&&d2.getFullYear()>=2000&&d2.getFullYear()<=2100){
-        addResult('script','timestamp:'+tm[1],tm[2],fmtBeijing(d2));
+        addResult('script','timestamp:'+tm[1],tm[2],fmtLocal(d2));
       }
     }
   }
