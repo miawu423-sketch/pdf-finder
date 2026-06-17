@@ -258,12 +258,31 @@
   }
   extractAll();
 
-  // ====== Sort: modified → published → others ======
+  // ====== Sort: precision first (has seconds > minutes > hours > date-only), then by source reliability ======
+  var sourceRank={meta:0,"json-ld":1,'data-attr':2,script:3,'time-tag':4,'class-id':5,regex:6};
+  function timePrecision(parsed){
+    if(!parsed)return 0;
+    var parts=parsed.match(/\d{2}/g);
+    if(!parts)return 0;
+    if(parts.length>=6)return 4;
+    if(parts.length>=5)return 3;
+    return 2;
+  }
   results.sort(function(a,b){
-    var sa=a.label.indexOf('modified')!==-1?0:(a.label.indexOf('published')!==-1?1:2);
-    var sb=b.label.indexOf('modified')!==-1?0:(b.label.indexOf('published')!==-1?1:2);
+    var pa=timePrecision(a.parsed),pb=timePrecision(b.parsed);
+    if(pa!==pb)return pb-pa;
+    var sa=sourceRank[a.source]!==undefined?sourceRank[a.source]:10;
+    var sb=sourceRank[b.source]!==undefined?sourceRank[b.source]:10;
     return sa-sb;
   });
+
+  function getBestIdx(){
+    for(var i=0;i<results.length;i++)if(timePrecision(results[i].parsed)>=3)return i;
+    for(var i=0;i<results.length;i++)if(results[i].label.indexOf('modified')!==-1)return i;
+    for(var i=0;i<results.length;i++)if(results[i].label.indexOf('published')!==-1)return i;
+    return results.length>0?0:-1;
+  }
+
 
   // ====== Render ======
   var d=document.createElement('div');d.id='__pub_time';
@@ -299,11 +318,6 @@
   var srcNames={meta:'Meta',"json-ld":'JSON-LD',script:'内联脚本','time-tag':'Time标签','data-attr':'Data属性','class-id':'Class/ID',regex:'正则匹配'};
   var srcColors={meta:'Tm',"json-ld":'Tj',script:'Ts','time-tag':'Tt','data-attr':'Td','class-id':'Tci',regex:'Tr'};
 
-  function getBestIdx(){
-    for(var i=0;i<results.length;i++)if(results[i].label.indexOf('modified')!==-1)return i;
-    for(var i=0;i<results.length;i++)if(results[i].label.indexOf('published')!==-1)return i;
-    return results.length>0?0:-1;
-  }
 
   function renderPanel(){
     var bi=getBestIdx(),h='<style>'+css+'</style><div class="P"><div class="H"><h2>发布时间提取 \u2014 '+
