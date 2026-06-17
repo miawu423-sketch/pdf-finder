@@ -40,6 +40,8 @@
   function parseTime(str){
     if(!str||str.length>50)return null;
     str=str.trim();
+    // Check if date-only (no time component) - don't apply UTC offset
+    var dateOnly=/^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(str)||/^\d{4}年\d{1,2}月\d{1,2}日$/.test(str);
     // ASP.NET /Date(ms+tz)/
     var am=/^\/Date\((\d{10,13})([+-]\d{4})?\)\/$/;
     var ama=am.exec(str);
@@ -77,7 +79,12 @@
     var formats=[/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/,/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}/,
       /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/,/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}/,/^\d{4}-\d{2}-\d{2}$/,/^\d{4}\/\d{2}\/\d{2}$/,
       /^\d{4}年\d{1,2}月\d{1,2}日 \d{1,2}:\d{2}:\d{2}/,/^\d{4}年\d{1,2}月\d{1,2}日 \d{1,2}:\d{2}/,/^\d{4}年\d{1,2}月\d{1,2}日/];
-    var d=new Date(str);if(!isNaN(d.getTime()))return fmtBeijing(d);
+    var d=new Date(str);if(!isNaN(d.getTime())){
+      var result=fmtBeijing(d);
+      // If date-only input, strip the spurious timezone-offset hours
+      if(dateOnly)result=result.replace(/ \d{2}:\d{2}:\d{2}$/,' 00:00:00');
+      return result;
+    }
 
     // Regex fallback
     var r=str.match(/(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})[日]?\s*(\d{1,2})?[：:]?(\d{1,2})?[：:]?(\d{1,2})?/);
