@@ -1,295 +1,363 @@
-// Publish Time Extractor v1 - Remote Script
-// 多层提取：meta 标签 → JSON-LD → 内联script + 全文扫描
-// 支持 SPA 延迟重试
+// Publish Time Extractor v2 - Remote Script
+// 7-layer extraction ported from Python PublishTimeExtractor
+// meta → json-ld → script-vars → time-tag → data-attr → class-id → regex
+// SPA delayed retry support
 
 (function() {
   'use strict';
 
   if (document.getElementById('__pub_time')) {
     document.getElementById('__pub_time').remove();
+    if (window.__pub_time_timer) clearInterval(window.__pub_time_timer);
     return;
   }
 
   var results = [];
   var retried = false;
+  var MODIFIED_UNTRUSTED_DOMAINS = ['toutiao.com','toutiaocdn.com','toutiaoimg.com',
+    'baijiahao.baidu.com','mbd.baidu.com','dy.163.com','yidianzixun.com',
+    'k.sina.cn','k.sina.com.cn','ifeng.com'];
 
-  // ====== 工具函数 ======
-  function formatDate(d) {
-    // 强制转换为北京时间 (UTC+8)
-    var offset = 8 * 60; // 8小时 = 480分钟
-    var localOffset = d.getTimezoneOffset(); // 本地时区与UTC的差值（分钟）
-    var beijingTime = new Date(d.getTime() + (offset + localOffset) * 60000);
-    var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
-    var date = beijingTime.getFullYear() + '/' + pad(beijingTime.getMonth()+1) + '/' + pad(beijingTime.getDate());
-    var h = beijingTime.getHours(), mi = beijingTime.getMinutes(), s = beijingTime.getSeconds();
-    if (h === 0 && mi === 0 && s === 0) return date;
-    return date + ' ' + pad(h) + ':' + pad(mi) + ':' + pad(s);
+  function isModifiedUntrusted() {
+    var h = location.hostname.replace(/^www\./,'');
+    return MODIFIED_UNTRUSTED_DOMAINS.some(function(d){return h.indexOf(d)!==-1;});
   }
+  var skipModified = isModifiedUntrusted();
 
-  function parseTime(str) {
-    var d = new Date(str);
-    if (!isNaN(d.getTime())) return formatDate(d);
-    var m = str.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
-    if (m) {
-      var rest = str.replace(m[0], '').trim();
-      var timeMatch = rest.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
-      if (timeMatch) d = new Date(+m[1], +m[2]-1, +m[3], +timeMatch[1], +timeMatch[2], +(timeMatch[3]||0));
-      else d = new Date(+m[1], +m[2]-1, +m[3]);
-      if (!isNaN(d.getTime())) return formatDate(d);
+  // ====== Utils ======
+  function pad(n){return n<10?'0'+n:''+n;}
+  function fmtBeijing(d){
+    var offset=8*60, localOffset=d.getTimezoneOffset();
+    var bt=new Date(d.getTime()+(offset+localOffset)*60000);
+    var date=bt.getFullYear()+'/'+pad(bt.getMonth()+1)+'/'+pad(bt.getDate());
+    var h=bt.getHours(),mi=bt.getMinutes(),s=bt.getSeconds();
+    if(h===0&&mi===0&&s===0)return date;
+    return date+' '+pad(h)+':'+pad(mi)+':'+pad(s);
+  }
+  function nowYear(){return new Date().getFullYear();}
+  function looksLikeDate(str){return /(?:20|19)\d{2}[-\/年\.]\d{1,2}[-\/月\.]\d{1,2}/.test(str)||/\d{4}[-\/\.]\d{1,2}[-\/\.]\d{1,2}\s+\d{1,2}:\d{2}/.test(str);}
+
+  function parseTime(str){
+    if(!str||str.length>50)return null;
+    str=str.trim();
+    // ASP.NET /Date(ms+tz)/
+    var am=/^\/Date\((\d{10,13})([+-]\d{4})?\)\/$/;
+    var ama=am.exec(str);
+    if(ama){var ts=+ama[1];if(ama[1].length===10)ts*=1000;var dt=new Date(ts);return isNaN(dt.getTime())?null:fmtBeijing(dt);}
+    // RFC 2822: Sun, 09 Mar 2025 22:21:38 +0900
+    var rm=/^[A-Z][a-z]{2},\s/;
+    if(rm.test(str)){var d2=new Date(str);if(!isNaN(d2.getTime()))return fmtBeijing(d2);}
+    // 2-digit year: 26-05-22 → 2026-05-22
+    if(/^\d{2}-/.test(str))str='20'+str;
+    // Dot-separated: 2026.06.14
+    var dm=str.match(/^(\d{4})\.(\d{1,2})\.(\d{1,2})/);
+    if(dm){str=dm[1]+'-'+pad(+dm[2])+'-'+pad(+dm[3])+(str.replace(dm[0],'').match(/(\d{2}:\d{2}(?::\d{2})?)/)||[''])[0];}
+    // DD-MM-YYYY (European): 15-06-2026
+    var em=str.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+    if(em&&+em[1]>12){str=em[3]+'-'+em[2]+'-'+em[1];}
+    // Chinese spaces: "2026 年 6 月 14 日" → "2026年6月14日"
+    str=str.replace(/(\d)\s+年\s*(\d)/,'$1年$2').replace(/(\d)\s+月\s*(\d)/,'$1月$2').replace(/(\d)\s+日/,'$1日');
+    // Chinese brackets: "（最近更新时间：2026年6月）"
+    var bm=str.match(/(\d{4}年\d{1,2}月(?:\d{1,2}日)?)/);
+    if(bm&&/[（(]/.test(str))str=bm[1];
+    // Xinhua: 202605/2313:03:30 → 2026-05-23 13:03:30
+    var xm=str.match(/^(\d{4})(\d{2})\/(\d{2})(\d{2}:\d{2}:\d{2})$/);
+    if(xm)str=xm[1]+'-'+xm[2]+'-'+xm[3]+' '+xm[4];
+    // Timestamps (10 or 13 digits)
+    if(/^\d{10}$/.test(str)){var d3=new Date(+str*1000);return isNaN(d3.getTime())?null:fmtBeijing(d3);}
+    if(/^\d{13}$/.test(str)){var d4=new Date(+str);return isNaN(d4.getTime())?null:fmtBeijing(d4);}
+    // No-year MM-DD HH:MM → add current year
+    var ny=str.match(/^(\d{2})-(\d{2})\s+(\d{2}:\d{2})$/);
+    if(ny)str=nowYear()+'-'+ny[1]+'-'+ny[2]+' '+ny[3]+':00';
+    // Z suffix → +00:00
+    str=str.replace(/(\d{2}:\d{2}:\d{2})Z$/,'$1+00:00').replace(/(\d{2}:\d{2}:\d{2}\.\d+)Z$/,'$1+00:00');
+    // Fix missing space: 2026-05-1213:00 → 2026-05-12 13:00
+    str=str.replace(/(\d{4}-\d{2}-\d{2})(\d{2}:\d{2})/,'$1 $2').replace(/(\d{4}\/\d{2}\/\d{2})(\d{2}:\d{2})/,'$1 $2');
+
+    var formats=[/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/,/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}/,
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/,/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}/,/^\d{4}-\d{2}-\d{2}$/,/^\d{4}\/\d{2}\/\d{2}$/,
+      /^\d{4}年\d{1,2}月\d{1,2}日 \d{1,2}:\d{2}:\d{2}/,/^\d{4}年\d{1,2}月\d{1,2}日 \d{1,2}:\d{2}/,/^\d{4}年\d{1,2}月\d{1,2}日/];
+    var d=new Date(str);if(!isNaN(d.getTime()))return fmtBeijing(d);
+
+    // Regex fallback
+    var r=str.match(/(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})[日]?\s*(\d{1,2})?[：:]?(\d{1,2})?[：:]?(\d{1,2})?/);
+    if(!r){r=str.match(/(\d{4})[-/年](\d{1,2})月?$/);if(r){try{var d5=new Date(+r[1],+r[2]-1,1);return isNaN(d5.getTime())?null:fmtBeijing(d5).replace(/ \d{2}:\d{2}:\d{2}/,' 00:00:00');}catch(e){}}}
+    if(r){
+      var y=+r[1],mo=+r[2],da=+r[3],h=+(r[4]||0),mi=+(r[5]||0),s=+(r[6]||0);
+      if(mo===0||da===0)return null;
+      try{var d6=new Date(y,mo-1,da,h,mi,s);return isNaN(d6.getTime())?null:fmtBeijing(d6);}catch(e){return null;}
     }
     return null;
   }
 
-  function dedup() {
-    var seen = {}, unique = [];
-    results.forEach(function(r) {
-      var key = r.label + '|' + r.raw;
-      if (!seen[key]) { seen[key] = true; unique.push(r); }
-    });
-    results = unique;
+  function dedup(){
+    var seen={},unique=[];
+    results.forEach(function(r){var k=r.label+'|'+r.raw;if(!seen[k]){seen[k]=true;unique.push(r);}});
+    results=unique;
   }
 
-  // ====== 第 1 层：meta 标签 ======
-  function extractMeta() {
-    var metaSelectors = [
-      { sel: 'meta[property="article:published_time"]', label: 'article:published_time' },
-      { sel: 'meta[property="article:modified_time"]', label: 'article:modified_time' },
-      { sel: 'meta[name="publishdate"]', label: 'publishdate' },
-      { sel: 'meta[name="publish_date"]', label: 'publish_date' },
-      { sel: 'meta[name="pubdate"]', label: 'pubdate' },
-      { sel: 'meta[name="PubDate"]', label: 'PubDate' },
-      { sel: 'meta[name="date"]', label: 'date' },
-      { sel: 'meta[name="dc.date"]', label: 'dc.date' },
-      { sel: 'meta[name="dc.date.issued"]', label: 'dc.date.issued' },
-      { sel: 'meta[name="citation_publication_date"]', label: 'citation_publication_date' },
-      { sel: 'meta[name="citation_online_date"]', label: 'citation_online_date' },
-      { sel: 'meta[name="citation_date"]', label: 'citation_date' },
-      { sel: 'meta[itemprop="datePublished"]', label: 'itemprop:datePublished' },
-      { sel: 'meta[itemprop="dateModified"]', label: 'itemprop:dateModified' },
-      { sel: 'meta[name="article.published"]', label: 'article.published' },
-      { sel: 'meta[name="sailthru.date"]', label: 'sailthru.date' },
-      { sel: 'meta[name="article_date_original"]', label: 'article_date_original' },
-      { sel: 'meta[name="og:updated_time"]', label: 'og:updated_time' },
-      { sel: 'meta[property="og:updated_time"]', label: 'og:updated_time' },
-      { sel: 'meta[name="last-modified"]', label: 'last-modified' },
-      { sel: 'meta[http-equiv="last-modified"]', label: 'http-equiv:last-modified' },
-      { sel: 'meta[name="weibo:article:create_at"]', label: 'weibo:article:create_at' },
-      { sel: 'meta[name="created"]', label: 'created' },
-      { sel: 'meta[name="pub_date"]', label: 'pub_date' }
+  function addResult(source,label,raw,parsed,isPrimary){
+    if(!raw)return;raw=(''+raw).trim();if(!raw)return;
+    var pr=parsed||parseTime(raw);
+    results.push({source:source,label:label,raw:raw,parsed:pr,primary:!!isPrimary});
+  }
+
+  // ====== Layer 1: Meta (prefers modified, unless blacklisted) ======
+  function extractMeta(){
+    if(!skipModified){
+      ['article:modified_time','og:updated_time','last-modified','lastmod','dateModified'].forEach(function(p){
+        var m=document.querySelector('meta[property="'+p+'"],meta[name="'+p+'"],meta[itemprop="'+p+'"]');
+        if(m&&m.getAttribute('content')){addResult('meta','modified:'+p,m.getAttribute('content'));return;}
+      });
+    }
+    ['article:published_time','article:published','publishdate','date','pubdate','datePublished','publication_date',
+     'og:published_time','dc.date.issued','citation_publication_date','citation_online_date',
+     'article.published','sailthru.date','weibo:article:create_at'].forEach(function(p){
+      var m=document.querySelector('meta[property="'+p+'"],meta[name="'+p+'"],meta[itemprop="'+p+'"]');
+      if(m&&m.getAttribute('content')){addResult('meta','published:'+p,m.getAttribute('content'));return;}
+    });
+    // Generic meta scan
+    document.querySelectorAll('meta[name][content]').forEach(function(el){
+      var n=el.getAttribute('name'),c=el.getAttribute('content');
+      if(n&&c&&/date|time|publish|pubdate|created|modified/i.test(n)&&looksLikeDate(c)){
+        addResult('meta',n,c);
+      }
+    });
+  }
+
+  // ====== Layer 2: JSON-LD (prefers modified, unless blacklisted) ======
+  function extractJsonLd(){
+    var seenKeys={};
+    document.querySelectorAll('script[type="application/ld+json"]').forEach(function(s){
+      try{walkJsonLd(JSON.parse(s.textContent));}catch(e){}
+    });
+    function walkJsonLd(obj){
+      if(!obj||typeof obj!=='object')return;
+      if(Array.isArray(obj)){obj.forEach(walkJsonLd);return;}
+      if(!skipModified){
+        ['dateModified','lastModified','modifiedDate'].forEach(function(f){
+          if(obj[f]){addResult('json-ld','modified:'+f,String(obj[f]));}
+        });
+      }
+      ['datePublished','publishDate','dateCreated','uploadDate'].forEach(function(f){
+        if(obj[f]){addResult('json-ld','published:'+f,String(obj[f]));}
+      });
+      if(obj['@graph'])walkJsonLd(obj['@graph']);
+      if(obj.mainEntity)walkJsonLd(obj.mainEntity);
+    }
+  }
+
+  // ====== Layer 3: Script variables ======
+  function extractScriptVars(text){
+    if(!text||text.length<10)return;
+    // /Date(ms+tz)/
+    var re=/\/Date\((\d{10,13})([+-]\d{4})?\)\//g,m;
+    while((m=re.exec(text))!==null){
+      var ms=+m[1];if(m[1].length===10)ms*=1000;
+      var dt=new Date(ms);
+      if(!isNaN(dt.getTime())&&dt.getFullYear()>=2000&&dt.getFullYear()<=2100){
+        var ctx=text.substring(Math.max(0,m.index-300),m.index);
+        var vm=ctx.match(/(\w+(?:Time|time|Date|date|Publish|publish|Create|create))\s*[=:]/);
+        addResult('script',vm?vm[1]:'inline /Date/',m[0],fmtBeijing(dt));
+      }
+    }
+    // JSON-string fields (prefer modified)
+    if(!skipModified){
+      ['"updateTime"','"modifiedTime"','"update_time"','"modified_at"','"lastModified"'].forEach(function(p){
+        var rm2=text.match(new RegExp(p+'\\s*:\\s*"([^"]{10,30})"'));
+        if(rm2){addResult('script','modified:'+p.slice(1,-1),rm2[1]);}
+      });
+    }
+    ['"created_at"','"publishTime"','"createTime"','"postDate"','"publish_time"'].forEach(function(p){
+      var rm2=text.match(new RegExp(p+'\\s*:\\s*"([^"]{10,30})"'));
+      if(rm2){addResult('script','published:'+p.slice(1,-1),rm2[1]);}
+    });
+    // Timestamp fields
+    var tr=/\b(created_at|publishTime|createTime|timestamp)\b\s*[=:]\s*["']?(\d{10,13})["']?/g,tm;
+    while((tm=tr.exec(text))!==null){
+      var v=+tm[2];if(tm[2].length===10)v*=1000;
+      var d2=new Date(v);
+      if(!isNaN(d2.getTime())&&d2.getFullYear()>=2000&&d2.getFullYear()<=2100){
+        addResult('script','timestamp:'+tm[1],tm[2],fmtBeijing(d2));
+      }
+    }
+  }
+
+  // ====== Layer 4: Time tags ======
+  function extractTimeTags(){
+    document.querySelectorAll('time[datetime]').forEach(function(t){
+      var dt=t.getAttribute('datetime');
+      if(dt){addResult('time-tag','<time datetime>',dt);}
+    });
+  }
+
+  // ====== Layer 5: Data attributes ======
+  function extractDataAttrs(){
+    ['data-time','data-publish-time','data-pubtime','data-date','data-created','data-timestamp','data-publish','data-createtime'].forEach(function(attr){
+      document.querySelectorAll('['+attr+']').forEach(function(el){
+        var v=el.getAttribute(attr);
+        if(v&&(looksLikeDate(v)||/^\d{10,13}$/.test(v))){addResult('data-attr',attr,v);}
+      });
+    });
+  }
+
+  // ====== Layer 6: Class/ID patterns ======
+  function extractClassId(){
+    var cidPat=/publish.*time|post.*time|date|time|create.*time|update.*time/i;
+    var headText=document.body?document.body.innerText.substring(0,500):'';
+    document.querySelectorAll('[class],[id]').forEach(function(el){
+      var cls=el.className||'',id=el.id||'';
+      if(cidPat.test(cls)||cidPat.test(id)){
+        var t=el.textContent?el.textContent.trim().substring(0,60):'';
+        if(looksLikeDate(t)){addResult('class-id',el.tagName.toLowerCase()+(id?'#'+id:''),t);}
+      }
+    });
+  }
+
+  // ====== Layer 7: Regex body text ======
+  function extractRegexBody(){
+    var bodyText=document.body?document.body.innerText:'';if(!bodyText)return;
+    var headText=bodyText.substring(0,500);
+    var yr=nowYear();
+
+    // Keyword-protected → full text
+    var kw=[
+      [/(?:更新时间|最后更新|修改时间|最后修改)[：:\s]*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}:\d{2}(?::\d{2})?)/g,'regex-modified-full'],
+      [/(?:更新时间|最后更新|修改时间)[：:\s]*(\d{2}-\d{2}\s+\d{2}:\d{2})/g,'regex-modified-noYear'],
+      [/(?:发布时间|时间)[：:\s]*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}:\d{2}(?::\d{2})?)/g,'regex-published-full'],
+      [/(?:发布时间|更新时间)[：:\s]*(\d{2}-\d{2}\s+\d{2}:\d{2})/g,'regex-published-noYear'],
+      [/(?:发布于|发表于|创建于)[：:\s]*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?\s*\d{1,2}[：:]\d{2})/g,'regex-prefix-full'],
+      [/(?:发布于|发表于|创建于)[：:\s]*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2})/g,'regex-prefix'],
+      [/更新于[：:\s]*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2})/g,'regex-prefix'],
     ];
+    kw.forEach(function(p){var m;while((m=p[0].exec(bodyText))!==null)addResult('regex',p[1],m[1]);});
 
-    document.querySelectorAll('meta[name][content]').forEach(function(el) {
-      var name = el.getAttribute('name');
-      var content = el.getAttribute('content');
-      if (!name || !content) return;
-      if (/date|time|publish|pubdate/i.test(name)) {
-        if (/\d{4}[\-\/\.]\d{1,2}[\-\/\.]\d{1,2}/.test(content) || /\d{8}/.test(content)) {
-          var alreadyKnown = metaSelectors.some(function(m) { return m.sel === 'meta[name="' + name + '"]'; });
-          if (!alreadyKnown) metaSelectors.push({ sel: 'meta[name="' + name + '"]', label: name });
-        }
-      }
-    });
-
-    metaSelectors.forEach(function(m) {
-      var el = document.querySelector(m.sel);
-      if (el) {
-        var val = el.getAttribute('content');
-        if (val && val.trim()) {
-          results.push({ source: 'meta', label: m.label, raw: val.trim(), parsed: parseTime(val.trim()) });
-        }
-      }
-    });
+    // Bare date → header only (first 500 chars)
+    var bare=[
+      [/(\d{4}年\d{1,2}月\d{1,2}日\s*\d{1,2}[：:]\d{2}(?:[：:]\d{2})?)/g,'regex-cn-datetime'],
+      [/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/g,'regex-standard'],
+      [/(\d{4}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2})/g,'regex-standard'],
+      [/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})/g,'regex-standard'],
+      [/(\d{4}\/\d{2}\/\d{2}\s+\d{2}:\d{2})/g,'regex-standard'],
+      [/(\d{4}年\d{1,2}月\d{1,2}日)/g,'regex-cn-date'],
+    ];
+    bare.forEach(function(p){var m;while((m=p[0].exec(headText))!==null)addResult('regex',p[1],m[1]);});
   }
 
-  // ====== 第 2 层：JSON-LD ======
-  function extractJsonLd() {
-    function walk(obj) {
-      if (!obj || typeof obj !== 'object') return;
-      if (Array.isArray(obj)) { obj.forEach(walk); return; }
-      if (obj.datePublished) results.push({ source: 'json-ld', label: 'datePublished', raw: String(obj.datePublished), parsed: parseTime(String(obj.datePublished)) });
-      if (obj.dateModified) results.push({ source: 'json-ld', label: 'dateModified', raw: String(obj.dateModified), parsed: parseTime(String(obj.dateModified)) });
-      if (obj.dateCreated) results.push({ source: 'json-ld', label: 'dateCreated', raw: String(obj.dateCreated), parsed: parseTime(String(obj.dateCreated)) });
-      if (obj['@graph']) walk(obj['@graph']);
-      if (obj.mainEntity) walk(obj.mainEntity);
-    }
-    document.querySelectorAll('script[type="application/ld+json"]').forEach(function(s) {
-      try { walk(JSON.parse(s.textContent)); } catch(e) {}
-    });
-  }
-
-  // ====== 第 3 层：内联 script + 全文扫描 ======
-  function extractScript(text) {
-    if (!text || text.length < 10) return;
-
-    // ASP.NET /Date(milliseconds+tz)/
-    var re = /\/Date\((\d{10,13})([+-]\d{4})?\)\//g, m;
-    while ((m = re.exec(text)) !== null) {
-      var ms = +m[1]; if (m[1].length === 10) ms *= 1000;
-      var dt = new Date(ms);
-      if (!isNaN(dt.getTime()) && dt.getFullYear() >= 2000 && dt.getFullYear() <= 2100) {
-        var ctx = text.substring(Math.max(0, m.index - 300), m.index);
-        var vm = ctx.match(/(\w+(?:Time|time|Date|date|Publish|publish|Create|create))\s*[=:]/);
-        results.push({ source: 'script', label: vm ? vm[1] : 'inline /Date/', raw: m[0], parsed: formatDate(dt) });
-      }
-    }
-
-    // 时间戳变量（publishTime: 1762972985000）
-    var tr = /\b(publishTime|createTime|pubTime|pubtime|create_time|publish_date|publishTime|createtime)\b\s*[=:]\s*["']?(\d{10,13})["']?/gi, tm;
-    while ((tm = tr.exec(text)) !== null) {
-      var v = +tm[2]; if (tm[2].length === 10) v *= 1000;
-      var d2 = new Date(v);
-      if (!isNaN(d2.getTime()) && d2.getFullYear() >= 2000 && d2.getFullYear() <= 2100) {
-        results.push({ source: 'script', label: tm[1], raw: tm[2], parsed: formatDate(d2) });
-      }
-    }
-
-    // ISO 字符串（"publishTime":"2025-11-13 08:00:00"）
-    var ir = /\b(publishTime|createTime|pubTime|pubtime|create_time|publish_date)\b\s*[=:]\s*"([^"]{10,30})"/gi, im;
-    while ((im = ir.exec(text)) !== null) {
-      var pt = parseTime(im[2]);
-      if (pt) results.push({ source: 'script', label: im[1], raw: im[2], parsed: pt });
-    }
-  }
-
-  // ====== 执行全部提取 ======
-  function extractAll() {
+  // ====== Execute all ======
+  function extractAll(){
     extractMeta();
     extractJsonLd();
-    document.querySelectorAll('script:not([src])').forEach(function(s) { extractScript(s.textContent); });
-    try { var fullHTML = document.documentElement.outerHTML || ''; if (fullHTML) extractScript(fullHTML); } catch(e) {}
+    document.querySelectorAll('script:not([src])').forEach(function(s){extractScriptVars(s.textContent);});
+    try{var fh=document.documentElement.outerHTML||'';if(fh)extractScriptVars(fh);}catch(e){}
+    extractTimeTags();
+    extractDataAttrs();
+    extractClassId();
+    extractRegexBody();
     dedup();
   }
-
   extractAll();
 
-  // ====== 渲染 ======
-  var d = document.createElement('div');
-  d.id = '__pub_time';
-  d.style.cssText = 'position:fixed;top:0;right:0;width:420px;max-height:80vh;z-index:2147483647;font:14px system-ui,-apple-system,sans-serif;color:#1d1d1f;';
-  var sh = d.attachShadow({ mode: 'open' });
+  // ====== Sort: modified → published → others ======
+  results.sort(function(a,b){
+    var sa=a.label.indexOf('modified')!==-1?0:(a.label.indexOf('published')!==-1?1:2);
+    var sb=b.label.indexOf('modified')!==-1?0:(b.label.indexOf('published')!==-1?1:2);
+    return sa-sb;
+  });
 
-  var css = [
+  // ====== Render ======
+  var d=document.createElement('div');d.id='__pub_time';
+  d.style.cssText='position:fixed;top:0;right:0;width:420px;max-height:80vh;z-index:2147483647;font:14px system-ui,-apple-system,sans-serif;color:#1d1d1f;';
+  var sh=d.attachShadow({mode:'open'});
+
+  var css=[
     '*{margin:0;padding:0;box-sizing:border-box}:host{all:initial}',
     '.P{background:#fff;border-radius:0 0 0 12px;box-shadow:0 4px 32px rgba(0,0,0,.18);display:flex;flex-direction:column;max-height:80vh;overflow:hidden}',
     '.H{background:#1d1d1f;color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between}',
     '.H h2{font:500 13px/1.4 system-ui}',
-    '.X{background:rgba(255,255,255,.2);border:0;color:#fff;width:24px;height:24px;border-radius:50%;font:16px/1 sans-serif;cursor:pointer}',
+    '.X{background:rgba(255,255,255,.2);border:0;color:#fff;width:24px;height:24px;border-radius:50%;font:16px/1 sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center}',
     '.X:hover{background:rgba(255,255,255,.35)}',
     '.B{overflow-y:auto;padding:12px;flex:1}',
     '.I{padding:10px 12px;margin:6px 0;background:#f8f8fa;border:1px solid #e8e8ed;border-radius:8px}',
-    '.I.primary{background:#f0faf4;border-color:#34c759}',
+    '.I.best{background:#f0faf4;border-color:#34c759}',
     '.IH{display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap}',
     '.T{display:inline-block;padding:2px 7px;border-radius:4px;font:500 11px/1.6 system-ui;color:#fff}',
-    '.Tm{background:#34c759}.Tj{background:#0071e3}.Ts{background:#ff9f0a}',
+    '.Tm{background:#34c759}.Tj{background:#0071e3}.Ts{background:#ff9f0a}.Tt{background:#7f5340}.Td{background:#0c447c}.Tci{background:#854f0b}.Tr{background:#72243e}',
+    '.badge{display:inline-block;padding:1px 6px;border-radius:4px;font:500 10px/1.6 system-ui;border:1px solid #34c759;color:#34c759}',
+    '.badge-mod{border-color:#0071e3;color:#0071e3}',
     '.label{font:12px system-ui;color:#86868b}',
-    '.time{font:500 15px/1.4 "SF Mono",Menlo,Consolas,monospace;color:#1d1d1f;margin:4px 0}',
-    '.raw{font:11px/1.4 "SF Mono",Menlo,Consolas,monospace;color:#86868b;word-break:break-all}',
+    '.time{font:500 15px/1.4 "SF Mono",Menlo,monospace;color:#1d1d1f;margin:4px 0}',
+    '.raw{font:11px/1.4 "SF Mono",Menlo,monospace;color:#86868b;word-break:break-all}',
     '.A{display:flex;gap:6px;margin-top:8px}',
     '.b{font:12px system-ui;padding:4px 12px;border-radius:6px;border:1px solid #d2d2d7;background:#fff;cursor:pointer;color:#1d1d1f}',
     '.b:hover{background:#f0f0f0}.bp{background:#0071e3;color:#fff;border-color:#0071e3}.bp:hover{background:#0077ed}',
     '.E{text-align:center;padding:24px 16px;color:#86868b;font-size:13px;line-height:1.8}',
-    '.divider{font-size:11px;color:#999;padding:8px 0 4px;border-top:1px dashed #e8e8ed;margin-top:8px}',
-    '.E .trying{font-size:11px;color:#ff9f0a;margin-top:8px}'
+    '.E .trying{font-size:11px;color:#ff9f0a;margin-top:8px}',
+    '.divider{font-size:11px;color:#999;padding:8px 0 4px;border-top:1px dashed #e8e8ed;margin-top:8px}'
   ].join('');
 
-  function getBestIndex() {
-    for (var i = 0; i < results.length; i++)
-      if (/published|pubdate|publish_date|publishdate|citation_publication/i.test(results[i].label)) return i;
-    return results.length > 0 ? 0 : -1;
+  var srcNames={meta:'Meta',"json-ld":'JSON-LD',script:'内联脚本','time-tag':'Time标签','data-attr':'Data属性','class-id':'Class/ID',regex:'正则匹配'};
+  var srcColors={meta:'Tm',"json-ld":'Tj',script:'Ts','time-tag':'Tt','data-attr':'Td','class-id':'Tci',regex:'Tr'};
+
+  function getBestIdx(){
+    for(var i=0;i<results.length;i++)if(results[i].label.indexOf('modified')!==-1)return i;
+    for(var i=0;i<results.length;i++)if(results[i].label.indexOf('published')!==-1)return i;
+    return results.length>0?0:-1;
   }
 
-  function renderPanel() {
-    var bestIdx = getBestIndex();
-    var divs = [
-      { source: 'meta', label: 'Meta \u6807\u7b7e' },
-      { source: 'json-ld', label: 'JSON-LD \u7ed3\u6784\u5316\u6570\u636e' },
-      { source: 'script', label: '\u5185\u8054\u811a\u672c (script)' }
-    ];
-
-    var h = '<style>' + css + '</style><div class="P"><div class="H"><h2>\u53d1\u5e03\u65f6\u95f4\u63d0\u53d6 \u2014 ' +
-      (results.length ? '\u627e\u5230 ' + results.length + ' \u4e2a' : '\u672a\u627e\u5230') +
+  function renderPanel(){
+    var bi=getBestIdx(),h='<style>'+css+'</style><div class="P"><div class="H"><h2>发布时间提取 \u2014 '+
+      (results.length?'找到 '+results.length+' 个':'未找到')+
       '</h2><button class="X" id="cls">\u00d7</button></div><div class="B">';
-
-    if (!results.length) {
-      h += '<div class="E">\u672a\u627e\u5230\u53d1\u5e03\u65f6\u95f4<br><br>\u53ef\u80fd\u7684\u539f\u56e0\uff1a<br>\u2022 \u8be5\u9875\u9762\u672a\u5728\u6e90\u7801\u4e2d\u6807\u6ce8\u65f6\u95f4<br>\u2022 \u65f6\u95f4\u7531 JS \u52a8\u6001\u52a0\u8f7d<br>\u2022 \u975e\u6587\u7ae0\u7c7b\u9875\u9762';
-      if (!retried) h += '<div class="trying">\u6b63\u5728\u5c1d\u8bd5\u5ef6\u8fdf\u626b\u63cf\u2026</div>';
-      h += '</div>';
+    if(!results.length){
+      h+='<div class="E">未找到发布时间<br><br>可能的原因：<br>\u2022 页面未在源码中标注时间<br>\u2022 时间由 JS 动态加载<br>\u2022 非文章类页面';
+      if(!retried)h+='<div class="trying">正在尝试延迟扫描\u2026</div>';h+='</div>';
     }
-
-    var prevSource = '';
-    results.forEach(function(r, i) {
-      if (r.source !== prevSource && i > 0) {
-        var lbl = divs.filter(function(d) { return d.source === r.source; })[0];
-        h += '<div class="divider">' + (lbl ? lbl.label : r.source) + '</div>';
-      }
-      prevSource = r.source;
-      var cls = 'I' + (i === bestIdx ? ' primary' : '');
-      var tagCls = r.source === 'meta' ? 'Tm' : (r.source === 'json-ld' ? 'Tj' : 'Ts');
-      h += '<div class="' + cls + '"><div class="IH">';
-      h += '<span class="T ' + tagCls + '">' + r.source + '</span>';
-      h += '<span class="label">' + r.label + '</span></div>';
-      if (r.parsed) h += '<div class="time">' + r.parsed + '</div>';
-      h += '<div class="raw">\u539f\u59cb\u503c: ' + r.raw.replace(/</g, '&lt;') + '</div>';
-      h += '<div class="A"><button class="b bp" data-c="' + i + '">\u590d\u5236\u65f6\u95f4</button>';
-      h += '<button class="b" data-r="' + i + '">\u590d\u5236\u539f\u59cb\u503c</button></div></div>';
+    var ps='';
+    results.forEach(function(r,i){
+      if(r.source!==ps&&i>0)h+='<div class="divider">'+(srcNames[r.source]||r.source)+'</div>';ps=r.source;
+      var cls='I'+(i===bi?' best':''),sc=srcColors[r.source]||'Tm';
+      h+='<div class="'+cls+'"><div class="IH"><span class="T '+sc+'">'+r.source+'</span>';
+      if(i===bi)h+='<span class="badge'+(r.label.indexOf('modified')!==-1?' badge-mod':'')+'">'+
+        (r.label.indexOf('modified')!==-1?'最可能(修改)':'最可能(发布)')+'</span>';
+      h+='<span class="label">'+r.label+'</span></div>';
+      if(r.parsed)h+='<div class="time">'+r.parsed+'</div>';
+      h+='<div class="raw">原始值: '+r.raw.replace(/</g,'&lt;')+'</div>';
+      h+='<div class="A"><button class="b bp" data-c="'+i+'">复制时间</button>';
+      h+='<button class="b" data-r="'+i+'">复制原始值</button></div></div>';
     });
-    h += '</div></div>';
-    return h;
+    h+='</div></div>';return h;
   }
 
-  function bindEvents() {
-    sh.getElementById('cls').onclick = function() { d.remove(); if (window.__pub_time_timer) clearInterval(window.__pub_time_timer); };
-    sh.querySelectorAll('[data-c]').forEach(function(btn) {
-      btn.onclick = function() {
-        var r = results[+this.getAttribute('data-c')];
-        var text = r.parsed || r.raw;
-        navigator.clipboard.writeText(text).then(function() {
-          btn.textContent = '\u5df2\u590d\u5236!';
-          setTimeout(function() { btn.textContent = '\u590d\u5236\u65f6\u95f4'; }, 1500);
-        }).catch(function() { prompt('\u590d\u5236:', text); });
-      };
+  function bindEvents(){
+    sh.getElementById('cls').onclick=function(){d.remove();if(window.__pub_time_timer)clearInterval(window.__pub_time_timer);};
+    sh.querySelectorAll('[data-c]').forEach(function(btn){
+      btn.onclick=function(){var t=(results[+this.getAttribute('data-c')].parsed||results[+this.getAttribute('data-c')].raw);
+        navigator.clipboard.writeText(t).then(function(){btn.textContent='已复制!';setTimeout(function(){btn.textContent='复制时间';},1500);})
+        .catch(function(){prompt('复制:',t);});};
     });
-    sh.querySelectorAll('[data-r]').forEach(function(btn) {
-      btn.onclick = function() {
-        var raw = results[+this.getAttribute('data-r')].raw;
-        navigator.clipboard.writeText(raw).then(function() {
-          btn.textContent = '\u5df2\u590d\u5236!';
-          setTimeout(function() { btn.textContent = '\u590d\u5236\u539f\u59cb\u503c'; }, 1500);
-        }).catch(function() { prompt('\u590d\u5236:', raw); });
-      };
+    sh.querySelectorAll('[data-r]').forEach(function(btn){
+      btn.onclick=function(){var r=results[+this.getAttribute('data-r')].raw;
+        navigator.clipboard.writeText(r).then(function(){btn.textContent='已复制!';setTimeout(function(){btn.textContent='复制原始值';},1500);})
+        .catch(function(){prompt('复制:',r);});};
     });
   }
 
-  function updatePanel() {
-    sh.innerHTML = renderPanel();
-    bindEvents();
+  function updatePanel(){sh.innerHTML=renderPanel();bindEvents();}
+  updatePanel();document.body.appendChild(d);
+
+  var bi=getBestIdx();
+  if(bi>=0&&results[bi]&&results[bi].parsed){
+    navigator.clipboard.writeText(results[bi].parsed).catch(function(){});
   }
 
-  updatePanel();
-  document.body.appendChild(d);
-
-  // 自动复制最可能的发布时间
-  var bestIdx = getBestIndex();
-  if (bestIdx >= 0 && results[bestIdx].parsed) {
-    navigator.clipboard.writeText(results[bestIdx].parsed).catch(function() {});
-  }
-
-  // SPA 延迟重试：如果首次没找到，每 1.5s 重试一次，最多 3 次
-  if (results.length === 0) {
-    var retryCount = 0;
-    window.__pub_time_timer = setInterval(function() {
-      retryCount++;
-      extractMeta();
-      document.querySelectorAll('script:not([src])').forEach(function(s) { extractScript(s.textContent); });
-      dedup();
-      if (results.length > 0 || retryCount >= 3) {
-        clearInterval(window.__pub_time_timer);
-        retried = true;
-        updatePanel();
-        if (results.length > 0 && results[getBestIndex()] && results[getBestIndex()].parsed) {
-          navigator.clipboard.writeText(results[getBestIndex()].parsed).catch(function() {});
-        }
-      }
-    }, 1500);
+  // SPA delayed retry: 1.5s intervals, max 3 times
+  if(results.length===0){
+    var rc=0;
+    window.__pub_time_timer=setInterval(function(){
+      rc++;extractAll();extractRegexBody();dedup();
+      if(results.length>0||rc>=3){clearInterval(window.__pub_time_timer);retried=true;updatePanel();
+        var bi2=getBestIdx();if(bi2>=0&&results[bi2]&&results[bi2].parsed)navigator.clipboard.writeText(results[bi2].parsed).catch(function(){});}
+    },1500);
   }
 })();
